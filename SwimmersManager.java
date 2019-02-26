@@ -9,23 +9,31 @@ import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.GridPane;
-import javafx.scene.layout.StackPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 import org.apache.derby.jdbc.EmbeddedDriver;
 
 import java.sql.*;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.List;
 
 public class SwimmersManager extends Application {
 
     private SwimmersDataController dbManager;
-    private ObservableList<Swimmer> swimmers;
+    private ObservableList<Swimmer> userViewSwimmers, originalViewSwimmers;
+    private TableView<Swimmer> userView, originalView;
+    private SortedState sortedState;
+    private List<Swimmer> swimmers;
 
     @Override
     public void start(Stage myStage) {
 
         dbManager = new SwimmersDataController();
+        swimmers = dbManager.getSwimmers();
+        sortedState = new TimeSortedState(swimmers);
+        sortedState.sort();
 
         myStage.setTitle("Swimmers Manager");
 
@@ -35,9 +43,9 @@ public class SwimmersManager extends Application {
         rootNode.setVgap(5);
         rootNode.setAlignment(Pos.CENTER);
 
-        Scene myScene = new Scene(rootNode, 800, 600);
+        Scene myScene = new Scene(rootNode, 1350, 600);
 
-        int row = -1;
+        int row = 2;
 
         // first name
         rootNode.add(new Label("First Name:"), 0, ++row);
@@ -75,17 +83,17 @@ public class SwimmersManager extends Application {
         rootNode.add(txtAge, 1, row);
 
         // age
-        rootNode.add(new Label("Average Time:"), 0, ++row);
+        rootNode.add(new Label("Time:"), 0, ++row);
         TextField txtTime = new TextField();
         rootNode.add(txtTime, 1, row);
 
         // total distance
-        rootNode.add(new Label("Distance Sum:"), 0, ++row);
+        rootNode.add(new Label("Distance:"), 0, ++row);
         TextField txtDistance = new TextField();
         rootNode.add(txtDistance, 1, row);
 
         // number of strokes
-        rootNode.add(new Label("Number of Strokes:"), 0, ++row);
+        rootNode.add(new Label("Strokes:"), 0, ++row);
         TextField txtStrokes = new TextField();
         rootNode.add(txtStrokes, 1, row);
 
@@ -105,7 +113,7 @@ public class SwimmersManager extends Application {
             String firstName = txtFirstName.getText();
             String lastName = txtLastName.getText();
             LocalDate birthDate = datePicker.getValue();
-            RadioButton rb = (RadioButton)sexGroup.getSelectedToggle();
+            RadioButton rb = (RadioButton) sexGroup.getSelectedToggle();
             String sex = rb != null ? rb.getText() : "Male";
             int age = Integer.parseInt(txtAge.getText());
             int strokes = Integer.parseInt(txtStrokes.getText());
@@ -124,21 +132,25 @@ public class SwimmersManager extends Application {
 
             boolean success = dbManager.addSwimmer(swimmer);
 
-            if(success) {
-                swimmers.add(swimmer);
+            if (success) {
+                userViewSwimmers.add(swimmer);
+                originalViewSwimmers.add(swimmer);
                 status.setText("Successfully added!");
+                userView.refresh();
+                originalView.refresh();
             } else {
                 status.setText("Not added!");
             }
 
         });
 
-        TableView<Swimmer> table = new TableView<>();
+        userView = new TableView<>();
 
-        TableColumn<Swimmer, String> firstNameCol = new TableColumn<>("First Name");
-        TableColumn<Swimmer, String> lastNameCol = new TableColumn<>("Last Name");
+        TableColumn<Swimmer, String> firstNameCol = new TableColumn<>("First");
+        TableColumn<Swimmer, String> lastNameCol = new TableColumn<>("Last");
         TableColumn<Swimmer, String> sexCol = new TableColumn<>("Sex");
         TableColumn<Swimmer, Integer> ageCol = new TableColumn<>("Age");
+        TableColumn<Swimmer, String> ageGroupCol = new TableColumn<>("AgeG");
         TableColumn<Swimmer, Float> timeCol = new TableColumn<>("Time");
 
         // Defines how to fill data for each cell.
@@ -148,24 +160,128 @@ public class SwimmersManager extends Application {
         lastNameCol.setCellValueFactory(new PropertyValueFactory<>("lastName"));
         sexCol.setCellValueFactory(new PropertyValueFactory<>("sex"));
         ageCol.setCellValueFactory(new PropertyValueFactory<>("age"));
+        ageGroupCol.setCellValueFactory(new PropertyValueFactory<>("ageGroup"));
         timeCol.setCellValueFactory(new PropertyValueFactory<>("bestAverageTime"));
 
-        // Set Sort type for userName column
-        firstNameCol.setSortType(TableColumn.SortType.DESCENDING);
-
         // Display row data
-        swimmers = FXCollections.observableArrayList(dbManager.getSwimmers());
-        table.setItems(swimmers);
+        userViewSwimmers = FXCollections.observableArrayList(swimmers);
+        userView.setItems(userViewSwimmers);
 
         //noinspection unchecked
-        table.getColumns().addAll(firstNameCol, lastNameCol, sexCol, ageCol, timeCol);
+        userView.getColumns().addAll(firstNameCol, lastNameCol, sexCol, ageCol, ageGroupCol, timeCol);
 
-        StackPane tableRoot = new StackPane();
-        tableRoot.getChildren().add(table);
+        for (TableColumn tc : userView.getColumns()) {
+            tc.setStyle("-fx-alignment:CENTER;");
+            tc.setSortable(false);
+        }
 
-        rootNode.add(tableRoot, 2, 0);
-        GridPane.setRowSpan(tableRoot, row+1);
-        GridPane.setValignment(tableRoot, VPos.TOP);
+        userView.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+
+        VBox userViewBox = new VBox();
+        userViewBox.setAlignment(Pos.CENTER);
+        userViewBox.getChildren().add(new Label("User View"));
+        userViewBox.getChildren().add(userView);
+
+        rootNode.add(userViewBox, 2, 0);
+        GridPane.setRowSpan(userViewBox, row);
+        GridPane.setValignment(userViewBox, VPos.TOP);
+
+        // Create the Label
+        Label sortLabel = new Label("Sort By:");
+
+        // Create the ComboBox
+        final ComboBox<String> sortFields = new ComboBox<>();
+        // Add the Months to the ComboBox
+        sortFields.getItems().addAll("Sex", "Time", "Age");
+        sortFields.setValue("Time");
+        // Set the Limit of visible sortFields to 5
+        sortFields.setVisibleRowCount(4);
+        // listen to sort field change
+        sortFields.setOnAction(e -> {
+            String sortField = sortFields.getValue();
+            switch (sortField) {
+                case "Time":
+                    sortedState = new TimeSortedState(swimmers);
+                    break;
+                case "Age":
+                    sortedState = new AgeSortedState(swimmers);
+                    break;
+                case "Sex":
+                    sortedState = new SexSortedState(swimmers);
+                    break;
+                default:
+                    break;
+            }
+        });
+
+        // Create the HBox for the Months
+        HBox sortBox = new HBox();
+        sortBox.getChildren().addAll(sortLabel, sortFields);
+
+        rootNode.add(sortBox, 2, row + 1);
+        GridPane.setHalignment(sortBox, HPos.LEFT);
+
+        Button btnSort = new Button("Sort User View");
+        rootNode.add(btnSort, 2, row + 1);
+        GridPane.setHalignment(btnSort, HPos.RIGHT);
+
+        // add handler
+        btnSort.setOnAction(e -> {
+
+            sortedState.sort();
+            userViewSwimmers.setAll(swimmers);
+            userView.refresh();
+
+        });
+
+        GridPane.setHalignment(sortBox, HPos.CENTER);
+
+        ////////////////////////////////////////
+        /////  ORIGINAL VIEW
+        ////////////////////////////////////////
+
+        originalView = new TableView<>();
+
+        TableColumn<Swimmer, String> firstNameColOriginal = new TableColumn<>("First");
+        TableColumn<Swimmer, String> lastNameColOriginal = new TableColumn<>("Last");
+        TableColumn<Swimmer, String> sexColOriginal = new TableColumn<>("Sex");
+        TableColumn<Swimmer, Integer> ageColOriginal = new TableColumn<>("Age");
+        TableColumn<Swimmer, Integer> ageGroupColOriginal = new TableColumn<>("AgeG");
+        TableColumn<Swimmer, Float> timeColOriginal = new TableColumn<>("Time");
+
+        // Defines how to fill data for each cell.
+        // Get value from property of UserAccount. .
+
+        firstNameColOriginal.setCellValueFactory(new PropertyValueFactory<>("firstName"));
+        lastNameColOriginal.setCellValueFactory(new PropertyValueFactory<>("lastName"));
+        sexColOriginal.setCellValueFactory(new PropertyValueFactory<>("sex"));
+        ageColOriginal.setCellValueFactory(new PropertyValueFactory<>("age"));
+        ageGroupColOriginal.setCellValueFactory(new PropertyValueFactory<>("ageGroup"));
+        timeColOriginal.setCellValueFactory(new PropertyValueFactory<>("bestAverageTime"));
+
+        // Display row data
+        originalViewSwimmers = FXCollections.observableArrayList(dbManager.getSwimmers());
+        originalView.setItems(originalViewSwimmers);
+
+        //noinspection unchecked
+        originalView.getColumns().addAll(firstNameColOriginal, lastNameColOriginal,
+                sexColOriginal, ageColOriginal, ageGroupColOriginal, timeColOriginal);
+
+        for (TableColumn tc : originalView.getColumns()) {
+            tc.setStyle("-fx-alignment:CENTER;");
+            tc.setSortable(false);
+        }
+
+        originalView.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+
+        VBox originalViewBox = new VBox();
+        originalViewBox.setAlignment(Pos.CENTER);
+        originalViewBox.getChildren().add(new Label("Original View"));
+        originalViewBox.getChildren().add(originalView);
+
+        rootNode.add(originalViewBox, 3, 0);
+        GridPane.setRowSpan(originalViewBox, row);
+        GridPane.setValignment(originalViewBox, VPos.TOP);
 
         myStage.setScene(myScene);
 
@@ -173,9 +289,8 @@ public class SwimmersManager extends Application {
 
     }
 
-
     @Override
-    public void stop(){
+    public void stop() {
         dbManager.closeDatabase();
     }
 
@@ -249,7 +364,7 @@ public class SwimmersManager extends Application {
                     swimmer.setBirthDay(rs.getDate("birth_day").toLocalDate());
                     swimmers.add(swimmer);
                 }
-                System.out.println("Swimmers length: "+swimmers.size());
+                System.out.println("Swimmers length: " + swimmers.size());
                 return swimmers;
             } catch (SQLException e) {
                 e.printStackTrace();
@@ -370,5 +485,83 @@ public class SwimmersManager extends Application {
             this.totalNumberOfStrokes = totalNumberOfStrokes;
         }
 
+        @SuppressWarnings("unused")
+        public String getAgeGroup() {
+            if (age < 14) {
+                return "1 - 13";
+            } else if (age < 18) {
+                return "14 - 18";
+            } else if (age < 25) {
+                return "19 - 25";
+            } else if (age < 30) {
+                return "26 - 30";
+            } else {
+                return "31 - INF";
+            }
+        }
+
     }
+
+    static abstract class SortedState {
+
+        List<Swimmer> swimmers;
+
+        SortedState(List<Swimmer> swimmers) {
+            this.swimmers = swimmers;
+        }
+
+        abstract void sort();
+
+    }
+
+    static class SexSortedState extends SortedState {
+
+        SexSortedState(List<Swimmer> swimmers) {
+            super(swimmers);
+        }
+
+        @Override
+        void sort() {
+            swimmers.sort((swimmerOne, swimmerTwo) -> {
+                String sex1 = swimmerOne.getSex();
+                String sex2 = swimmerTwo.getSex();
+                return sex1.compareTo(sex2);
+            });
+        }
+    }
+
+    static class AgeSortedState extends SortedState {
+
+        AgeSortedState(List<Swimmer> swimmers) {
+            super(swimmers);
+        }
+
+        @Override
+        void sort() {
+            swimmers.sort((swimmerOne, swimmerTwo) -> {
+                int age1 = swimmerOne.getAge();
+                int age2 = swimmerTwo.getAge();
+                return Integer.compare(age1, age2);
+            });
+        }
+    }
+
+    static class TimeSortedState extends SortedState {
+
+
+        TimeSortedState(List<Swimmer> swimmers) {
+            super(swimmers);
+        }
+
+        @Override
+        void sort() {
+            swimmers.sort((swimmerOne, swimmerTwo) -> {
+                float t1 = swimmerOne.getBestAverageTime();
+                float t2 = swimmerTwo.getBestAverageTime();
+                return Float.compare(t1, t2);
+            });
+        }
+    }
+
+
 }
